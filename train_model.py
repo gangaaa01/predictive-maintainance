@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import joblib
 import matplotlib.pyplot as plt
 
@@ -20,6 +19,8 @@ from sklearn.metrics import (
     ConfusionMatrixDisplay,
     roc_curve
 )
+
+from xgboost import XGBClassifier
 
 
 # ============================================================
@@ -50,7 +51,6 @@ features = [
 
 X = df[features]
 y = df["Machine failure"]
-
 
 print("\nFeatures used:")
 for feature in features:
@@ -90,8 +90,7 @@ numeric_features = [
 ]
 
 
-# Preprocessing for Random Forest
-rf_preprocessor = ColumnTransformer(
+tree_preprocessor = ColumnTransformer(
     transformers=[
         (
             "categorical",
@@ -103,7 +102,6 @@ rf_preprocessor = ColumnTransformer(
 )
 
 
-# Preprocessing for Logistic Regression
 lr_preprocessor = ColumnTransformer(
     transformers=[
         (
@@ -126,7 +124,7 @@ lr_preprocessor = ColumnTransformer(
 
 random_forest = Pipeline(
     steps=[
-        ("preprocessor", rf_preprocessor),
+        ("preprocessor", tree_preprocessor),
         (
             "model",
             RandomForestClassifier(
@@ -147,6 +145,25 @@ logistic_regression = Pipeline(
             LogisticRegression(
                 max_iter=1000,
                 class_weight="balanced",
+                random_state=42
+            )
+        )
+    ]
+)
+
+
+xgboost_model = Pipeline(
+    steps=[
+        ("preprocessor", tree_preprocessor),
+        (
+            "model",
+            XGBClassifier(
+                n_estimators=200,
+                max_depth=5,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                eval_metric="logloss",
                 random_state=42
             )
         )
@@ -195,33 +212,59 @@ lr_auc = roc_auc_score(y_test, lr_prob)
 
 
 # ============================================================
-# 8. MODEL COMPARISON
+# 8. TRAIN XGBOOST
+# ============================================================
+
+print("\n----------------------------------------")
+print("Training XGBoost...")
+print("----------------------------------------")
+
+xgboost_model.fit(X_train, y_train)
+
+xgb_pred = xgboost_model.predict(X_test)
+xgb_prob = xgboost_model.predict_proba(X_test)[:, 1]
+
+xgb_accuracy = accuracy_score(y_test, xgb_pred)
+xgb_precision = precision_score(y_test, xgb_pred, zero_division=0)
+xgb_recall = recall_score(y_test, xgb_pred, zero_division=0)
+xgb_f1 = f1_score(y_test, xgb_pred, zero_division=0)
+xgb_auc = roc_auc_score(y_test, xgb_prob)
+
+
+# ============================================================
+# 9. MODEL COMPARISON
 # ============================================================
 
 results = pd.DataFrame({
     "Model": [
         "Random Forest",
-        "Logistic Regression"
+        "Logistic Regression",
+        "XGBoost"
     ],
     "Accuracy": [
         rf_accuracy,
-        lr_accuracy
+        lr_accuracy,
+        xgb_accuracy
     ],
     "Precision": [
         rf_precision,
-        lr_precision
+        lr_precision,
+        xgb_precision
     ],
     "Recall": [
         rf_recall,
-        lr_recall
+        lr_recall,
+        xgb_recall
     ],
     "F1 Score": [
         rf_f1,
-        lr_f1
+        lr_f1,
+        xgb_f1
     ],
     "ROC-AUC": [
         rf_auc,
-        lr_auc
+        lr_auc,
+        xgb_auc
     ]
 })
 
@@ -233,51 +276,100 @@ print(results.round(4).to_string(index=False))
 
 
 # ============================================================
-# 9. RANDOM FOREST CLASSIFICATION REPORT
+# 10. RANDOM FOREST CLASSIFICATION REPORT
 # ============================================================
 
 print("\n========================================")
 print("RANDOM FOREST CLASSIFICATION REPORT")
 print("========================================")
 
-print(classification_report(
-    y_test,
-    rf_pred,
-    zero_division=0
-))
+print(
+    classification_report(
+        y_test,
+        rf_pred,
+        zero_division=0
+    )
+)
 
 
 # ============================================================
-# 10. CONFUSION MATRIX
+# 11. XGBOOST CLASSIFICATION REPORT
+# ============================================================
+
+print("\n========================================")
+print("XGBOOST CLASSIFICATION REPORT")
+print("========================================")
+
+print(
+    classification_report(
+        y_test,
+        xgb_pred,
+        zero_division=0
+    )
+)
+
+
+# ============================================================
+# 12. RANDOM FOREST CONFUSION MATRIX
 # ============================================================
 
 rf_cm = confusion_matrix(y_test, rf_pred)
 
-print("Random Forest Confusion Matrix:")
+print("\nRandom Forest Confusion Matrix:")
 print(rf_cm)
 
-
-plt.figure(figsize=(6, 5))
+fig, ax = plt.subplots(figsize=(6, 5))
 
 ConfusionMatrixDisplay(
     confusion_matrix=rf_cm,
     display_labels=["No Failure", "Failure"]
-).plot()
+).plot(ax=ax)
 
 plt.title("Random Forest - Confusion Matrix")
 plt.tight_layout()
 
-plt.savefig("random_forest_confusion_matrix.png", dpi=300)
+plt.savefig(
+    "random_forest_confusion_matrix.png",
+    dpi=300
+)
 
-plt.show()
+plt.close()
 
 
 # ============================================================
-# 11. ROC CURVE
+# 13. XGBOOST CONFUSION MATRIX
+# ============================================================
+
+xgb_cm = confusion_matrix(y_test, xgb_pred)
+
+print("\nXGBoost Confusion Matrix:")
+print(xgb_cm)
+
+fig, ax = plt.subplots(figsize=(6, 5))
+
+ConfusionMatrixDisplay(
+    confusion_matrix=xgb_cm,
+    display_labels=["No Failure", "Failure"]
+).plot(ax=ax)
+
+plt.title("XGBoost - Confusion Matrix")
+plt.tight_layout()
+
+plt.savefig(
+    "xgboost_confusion_matrix.png",
+    dpi=300
+)
+
+plt.close()
+
+
+# ============================================================
+# 14. ROC CURVE
 # ============================================================
 
 rf_fpr, rf_tpr, _ = roc_curve(y_test, rf_prob)
 lr_fpr, lr_tpr, _ = roc_curve(y_test, lr_prob)
+xgb_fpr, xgb_tpr, _ = roc_curve(y_test, xgb_prob)
 
 plt.figure(figsize=(7, 5))
 
@@ -294,6 +386,12 @@ plt.plot(
 )
 
 plt.plot(
+    xgb_fpr,
+    xgb_tpr,
+    label=f"XGBoost (AUC = {xgb_auc:.3f})"
+)
+
+plt.plot(
     [0, 1],
     [0, 1],
     linestyle="--",
@@ -302,28 +400,34 @@ plt.plot(
 
 plt.xlabel("False Positive Rate")
 plt.ylabel("True Positive Rate")
-
 plt.title("ROC Curve - Model Comparison")
 
 plt.legend()
-
 plt.tight_layout()
 
-plt.savefig("roc_curve_comparison.png", dpi=300)
+plt.savefig(
+    "roc_curve_comparison.png",
+    dpi=300
+)
 
-plt.show()
+plt.close()
 
 
 # ============================================================
-# 12. FEATURE IMPORTANCE - RANDOM FOREST
+# 15. FEATURE IMPORTANCE - XGBOOST
 # ============================================================
 
-rf_model = random_forest.named_steps["model"]
-rf_preprocessor_fitted = random_forest.named_steps["preprocessor"]
+xgb_model = xgboost_model.named_steps["model"]
 
-feature_names = rf_preprocessor_fitted.get_feature_names_out()
+xgb_preprocessor_fitted = (
+    xgboost_model.named_steps["preprocessor"]
+)
 
-importances = rf_model.feature_importances_
+feature_names = (
+    xgb_preprocessor_fitted.get_feature_names_out()
+)
+
+importances = xgb_model.feature_importances_
 
 feature_importance = pd.DataFrame({
     "Feature": feature_names,
@@ -335,15 +439,14 @@ feature_importance = feature_importance.sort_values(
     ascending=False
 )
 
-
 print("\n========================================")
-print("RANDOM FOREST FEATURE IMPORTANCE")
+print("XGBOOST FEATURE IMPORTANCE")
 print("========================================")
 
-print(feature_importance.to_string(index=False))
+print(
+    feature_importance.to_string(index=False)
+)
 
-
-# Plot top features
 
 top_features = feature_importance.head(10)
 
@@ -355,31 +458,31 @@ plt.barh(
 )
 
 plt.xlabel("Importance")
-
 plt.ylabel("Feature")
 
-plt.title("Top Features for Machine Failure Prediction")
+plt.title(
+    "Top Features for Machine Failure Prediction - XGBoost"
+)
 
 plt.tight_layout()
 
-plt.savefig("feature_importance.png", dpi=300)
+plt.savefig(
+    "feature_importance.png",
+    dpi=300
+)
 
-plt.show()
-
-
-# ============================================================
-# 13. SELECT FINAL MODEL
-# ============================================================
-
-# Random Forest is selected here as the final model
-# because it handles nonlinear relationships well and
-# provides feature importance.
-
-final_model = random_forest
+plt.close()
 
 
 # ============================================================
-# 14. SAVE FINAL MODEL
+# 16. SELECT FINAL MODEL
+# ============================================================
+
+final_model = xgboost_model
+
+
+# ============================================================
+# 17. SAVE FINAL MODEL
 # ============================================================
 
 joblib.dump(
@@ -391,10 +494,15 @@ print("\n========================================")
 print("FINAL MODEL SAVED")
 print("========================================")
 
-print("File: predictive_maintenance_model.pkl")
+print("Final model: XGBoost")
+
+print(
+    "File: predictive_maintenance_model.pkl"
+)
 
 print("\nAdditional files created:")
 print("- random_forest_confusion_matrix.png")
+print("- xgboost_confusion_matrix.png")
 print("- roc_curve_comparison.png")
 print("- feature_importance.png")
 
